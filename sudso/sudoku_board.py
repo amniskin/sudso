@@ -4,6 +4,7 @@
 # Date              : 2019-01-16
 # Last Modified Date: 2019-01-18
 # Last Modified By  : Aaron Niskin <aaron@niskin.org>
+# pylint: disable=fixme
 """
 Build the sudoku board object, along with all appropriate methods.
 
@@ -35,6 +36,7 @@ The basic structure is:
 """
 
 import logging
+from itertools import product
 # from copy import deepcopy
 
 LOGGER = logging.getLogger(__file__)
@@ -191,14 +193,8 @@ class SudokuCell():
     def __init__(self, id_, dim):
         self.id_ = id_
         self.val = None
-        self.static = False
         self.dim = dim
         self.options = set(range(dim**2))
-
-    def _is_static(self):
-        """Get the sudoku board vector
-        """
-        return self.static
 
     def set_value(self, val):
         """Sets the value of the cell
@@ -231,14 +227,9 @@ class SudokuCell():
             return list(self.options)[0]
         return None
 
-    def is_solved(self):
-        """Is this cell figured out?"""
-        return self.val is not None
-
     def copy(self):
         """Copy the cell"""
         cell = SudokuCell(self.val, self.dim)
-        cell.static = self.static
         cell.options = self.options
         return cell
 
@@ -259,14 +250,12 @@ class SudokuBoard():
             the values are the values to initialize the board with, and the
             keys are the IDs of the cells in question.
     """
-
     def __init__(self, dim, **kwargs):
         self.dim = dim
         self.board = [SudokuCell(id_, dim) for id_ in range(dim**4)]
         for id_, val in kwargs.items():
             id_ = int(id_.strip('_'))
             assert self.make_move(id_, val-1), 'Invalid starting position for a board'
-            self.board[id_].static = True
 
     def copy(self):
         """make a copy of the board"""
@@ -282,6 +271,13 @@ class SudokuBoard():
             other_val = self.board[other_id].remove_option(val)
             if other_val is not None:
                 self.make_move(other_id, other_val)
+        return True
+
+    def remove_option(self, id_, val):
+        """remove an option from a cell"""
+        opt_val = self[id_].remove_option(val)
+        if opt_val is not None:
+            self.make_move(id_, opt_val)
         return True
 
     def __str__(self):
@@ -303,11 +299,7 @@ class SudokuBoard():
                     else:
                         outstr += '-'*line_len + '\n'
                     outstr += '|'
-        return " Sudoku board:\n" + ('='*line_len) + '\n' + outstr
-
-    def print_board(self):
-        """print board"""
-        print(self.__str__())
+        return " Sudoku board:\n" + ('='*line_len) + '\n' + outstr + '|'*(line_len - 1)
 
     def __itercols__(self):
         for i in range(self.dim**2):
@@ -321,23 +313,26 @@ class SudokuBoard():
         for i in range(self.dim**2):
             yield _box_to_ids(i, self.dim)
 
-    def __step_1_inner__(self, items):
-        changed = False
-        for i in range(self.dim**2):
-            cells = [x for x in items if i in self.board[x].options]
-            if len(cells) == 1:
-                self.make_move(cells[0], i)
-                changed = True
-        return changed
-
-    def __step_1__(self):
+    def __solver__(self, num):
+        def inner_func(items):
+            changed = False
+            if num < 1:
+                return changed
+            for vals in product(range(self.dim**2), repeat=num):
+                cells = [x for x in items if set(vals).issubset(self.board[x].options)]
+                if len(cells) == num:
+                    for cell in cells:
+                        for k in self[cell].options.difference(vals):
+                            self.remove_option(cell, k)
+                    changed = True
+            return changed
         changed = False
         for row in self.__iterrows__():
-            changed = changed or self.__step_1_inner__(row)
+            changed = changed or inner_func(row)
         for col in self.__itercols__():
-            changed = changed or self.__step_1_inner__(col)
+            changed = changed or inner_func(col)
         for box in self.__iterboxes__():
-            changed = changed or self.__step_1_inner__(box)
+            changed = changed or inner_func(box)
         return changed
 
     def solve(self):
@@ -345,12 +340,25 @@ class SudokuBoard():
         changed = True
         while changed:
             changed = False
-            for id_, cell in enumerate(self.board):
-                if len(cell.options) == 1:
-                    val = list(cell.options)[0]
-                    self.make_move(id_, val)
-                    changed = True
-            changed = changed or self.__step_1__()
+            for i in range(4):  # TODO: remove hard coded magic number
+                for j in range(i):
+                    changed = changed or self.__solver__(j)
+            # changed = False
+            # changed = changed or self.__step_1__()
+
+    def check_board(self):
+        """docstring"""
+        for i, items in enumerate(self.__iterrows__()):
+            if len({self[x].val for x in items}) != self.dim**2:
+                print('rows', i)
+                return False
+        for items in self.__itercols__():
+            if len({self[x].val for x in items}) != self.dim**2:
+                return False
+        for items in self.__iterboxes__():
+            if len({self[x].val for x in items}) != self.dim**2:
+                return False
+        return True
     def __getitem__(self, i):
         return self.board[i]
 
