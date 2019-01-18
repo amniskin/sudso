@@ -42,7 +42,7 @@ SH = logging.StreamHandler()
 SH.setLevel(logging.DEBUG)
 LOGGER.addHandler(SH)
 
-SAMPLE_BOARD = {
+SBOARD0 = {
         '_0': 5,
         '_1': 3,
         '_4': 7,
@@ -75,7 +75,7 @@ SAMPLE_BOARD = {
         '_80':9
         }
 
-SBOARD2 = {
+SBOARD1 = {
         '_7': 1,
         '_14':2,
         '_17':3,
@@ -95,7 +95,7 @@ SBOARD2 = {
         '_76':1
         }
 
-SBOARD3 = {
+SBOARD2 = {
         '_0':8,
         '_1':6,
         '_4':2,
