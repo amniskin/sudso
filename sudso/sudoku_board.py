@@ -397,18 +397,11 @@ class SudokuBoard():
 
     def is_valid(self):
         """docstring"""
-        for items in self.__iterrows__():
-            item_vals = [self[x].val for x in items if self[x].val is not None]
-            if len(set(item_vals)) != len(item_vals):
-                return False
-        for items in self.__itercols__():
-            item_vals = [self[x].val for x in items if self[x].val is not None]
-            if len(set(item_vals)) != len(item_vals):
-                return False
-        for items in self.__iterboxes__():
-            item_vals = [self[x].val for x in items if self[x].val is not None]
-            if len(set(item_vals)) != len(item_vals):
-                return False
+        for func in [self.__iterrows__, self.__itercols__, self.__iterboxes__]:
+            for items in func():
+                item_vals = [self[x].val for x in items if self[x].val is not None]
+                if len(set(item_vals)) != len(item_vals):
+                    return False
         return True
 
     def complete(self):
