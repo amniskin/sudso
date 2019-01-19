@@ -2,7 +2,7 @@
 # -*- coding: utf-8 -*-
 # Author            : Aaron Niskin <aaron@niskin.org>
 # Date              : 2019-01-16
-# Last Modified Date: 2019-01-18
+# Last Modified Date: 2019-01-19
 # Last Modified By  : Aaron Niskin <aaron@niskin.org>
 # pylint: disable=fixme
 """
@@ -36,7 +36,8 @@ The basic structure is:
 """
 
 import logging
-from itertools import product
+from itertools import combinations
+from functools import reduce
 # from copy import deepcopy
 
 LOGGER = logging.getLogger(__file__)
@@ -117,6 +118,8 @@ SBOARD2 = {
         '_77':9
         }
 
+BOARDS = [SBOARD0, SBOARD1, SBOARD2]
+
 
 def _rowcol_to_id(row, column, dim):
     """Convert row,column to ID"""
@@ -194,7 +197,7 @@ class SudokuCell():
         self.id_ = id_
         self.val = None
         self.dim = dim
-        self.options = set(range(dim**2))
+        self.options = set(range(1, dim**2+1))
 
     def set_value(self, val):
         """Sets the value of the cell
@@ -205,9 +208,7 @@ class SudokuCell():
             val : int
                 The value to remove.
         """
-        assert (0 <= val < self.dim**2), "Innapropriate value"
-        if val not in self.options:
-            return False
+        assert (val in self.options) or (val == self.val), "Innapropriate value"
         self.val = val
         self.options.clear()
         return True
@@ -235,7 +236,7 @@ class SudokuCell():
 
     def __str__(self):
         """return a string representation of the cell (just the value)"""
-        return '  % 3s  ' % (str(self.val+1) if self.val is not None else '')
+        return '  % 3s  ' % (str(self.val) if self.val is not None else '')
 
 
 class SudokuBoard():
@@ -250,35 +251,107 @@ class SudokuBoard():
             the values are the values to initialize the board with, and the
             keys are the IDs of the cells in question.
     """
-    def __init__(self, dim, **kwargs):
+    def __init__(self, dim, init=True, **kwargs):
         self.dim = dim
         self.board = [SudokuCell(id_, dim) for id_ in range(dim**4)]
         for id_, val in kwargs.items():
             id_ = int(id_.strip('_'))
-            assert self.make_move(id_, val-1), 'Invalid starting position for a board'
-
-    def copy(self):
-        """make a copy of the board"""
-        board = SudokuBoard(self.dim)
-        board.board = [x.copy() for x in self.board]
-        return board
+            if init:
+                self.make_move(id_, val)
+            else:
+                self[id_].val = val
 
     def make_move(self, id_, val):
         """make a move (and propagate the changes"""
-        if not self.board[id_].set_value(val):
-            return False
+        assert self[id_].set_value(val), 'Cell %i recieved invalid value %i' % (id_, val)
         for other_id in _id_to_related(id_, self.dim):
-            other_val = self.board[other_id].remove_option(val)
-            if other_val is not None:
-                self.make_move(other_id, other_val)
+            self.remove_option(other_id, val)
         return True
 
     def remove_option(self, id_, val):
         """remove an option from a cell"""
         opt_val = self[id_].remove_option(val)
         if opt_val is not None:
-            self.make_move(id_, opt_val)
-        return True
+            return self.make_move(id_, opt_val)
+        return False
+
+    def __solver__(self, num):
+        def inner_func(items):
+            inner_changed = False
+            if num < 1:
+                return inner_changed
+            for vals in map(set, combinations(range(1, self.dim**2+1), num)):
+                # if there is a set of N values with only N cells that can be
+                # them, then pidgeon hole principle tells us that they each
+                # must be one of those N values. So we can remove all other
+                # values from these N
+                cells = {x for x in items if vals.intersection(self[x].options)}
+                # to make sure it isn't really 5 cells only representing 4
+                # values (because one never shows up)
+                all_vals_represented = vals.issubset(reduce(lambda x, y: x.union(self[y].options),
+                                                            cells, set()))
+                if len(cells) == num and all_vals_represented:
+                    # remove all other options from these cells
+                    for cell in cells:
+                        for k in self[cell].options.difference(vals):
+                            newval = self.remove_option(cell, k)
+                            inner_changed = inner_changed or newval
+                # if there is a set of N cells that can only be N values,
+                # similar logic applies -- but in this case, we know no other
+                # cells can be these values.
+                cells = {x for x in items if self[x].options.issubset(vals) and self[x].options}
+                all_vals_represented = vals.issubset(reduce(lambda x, y: x.union(self[y].options),
+                                                            cells, set()))
+                if len(cells) == num and all_vals_represented:
+                    # remove these options from all other cells
+                    for cell in [x for x in items if x not in cells]:
+                        for k in vals:
+                            newval = self.remove_option(cell, k)
+                            inner_changed = inner_changed or newval
+            return inner_changed
+        changed = False
+        for row in self.__iterrows__():
+            changed = changed or inner_func(row)
+        for col in self.__itercols__():
+            changed = changed or inner_func(col)
+        for box in self.__iterboxes__():
+            changed = changed or inner_func(box)
+        return changed
+
+    def guess(self):
+        """make a guess"""
+        this_cell = None
+        for cell in self.board:
+            if cell.val is None:
+                this_cell = cell
+                break
+        if this_cell is None:
+            return False, self.board
+        new_board = self.copy()
+        new_board.make_move(this_cell.id_, list(this_cell.options)[0])
+        return True, new_board.board
+
+    def solve(self):
+        """Solve this board!"""
+        # self.init()
+        changed = True
+        while changed:
+            changed = False
+            for i in range(2, 6):  # TODO: remove hard coded magic number
+                changed = False
+                for j in range(1, i):
+                    this_chng = self.__solver__(j)
+                    changed = changed or this_chng
+                    if not self.is_valid():
+                        return False
+                if self.complete():
+                    return True
+
+    def copy(self):
+        """make a copy of the board"""
+        new_board = SudokuBoard(self.dim)
+        new_board.board = [x.copy() for x in self.board]
+        return new_board
 
     def __str__(self):
         """Get the sudoku board vector"""
@@ -292,7 +365,6 @@ class SudokuBoard():
                     outstr += '|'
                     if line_len is None:
                         line_len = len(outstr)
-                        outstr = '-'*line_len + '\n' + outstr
                     outstr += '\n'
                     if (id_ % (self.dim**3)) == (-1 % (self.dim**3)):
                         outstr += '='*line_len + '\n'
@@ -300,6 +372,9 @@ class SudokuBoard():
                         outstr += '-'*line_len + '\n'
                     outstr += '|'
         return " Sudoku board:\n" + ('='*line_len) + '\n' + outstr + '|'*(line_len - 1)
+
+    def __repr__(self):
+        return self.__str__()
 
     def __itercols__(self):
         for i in range(self.dim**2):
@@ -313,54 +388,42 @@ class SudokuBoard():
         for i in range(self.dim**2):
             yield _box_to_ids(i, self.dim)
 
-    def __solver__(self, num):
-        def inner_func(items):
-            changed = False
-            if num < 1:
-                return changed
-            for vals in product(range(self.dim**2), repeat=num):
-                cells = [x for x in items if set(vals).issubset(self.board[x].options)]
-                if len(cells) == num:
-                    for cell in cells:
-                        for k in self[cell].options.difference(vals):
-                            self.remove_option(cell, k)
-                    changed = True
-            return changed
-        changed = False
-        for row in self.__iterrows__():
-            changed = changed or inner_func(row)
-        for col in self.__itercols__():
-            changed = changed or inner_func(col)
-        for box in self.__iterboxes__():
-            changed = changed or inner_func(box)
-        return changed
+    def init(self):
+        """ initialize the cells """
+        for id_, cell in enumerate(self.board):
+            if cell.val is not None:
+                assert self.make_move(cell.id_, cell.val), ('Invalid board state!'
+                                                            ' ID: %i val: %i' % (id_, cell.val))
 
-    def solve(self):
-        """Solve this board!"""
-        changed = True
-        while changed:
-            changed = False
-            for i in range(4):  # TODO: remove hard coded magic number
-                for j in range(i):
-                    changed = changed or self.__solver__(j)
-            # changed = False
-            # changed = changed or self.__step_1__()
-
-    def check_board(self):
+    def is_valid(self):
         """docstring"""
-        for i, items in enumerate(self.__iterrows__()):
-            if len({self[x].val for x in items}) != self.dim**2:
-                print('rows', i)
+        for items in self.__iterrows__():
+            item_vals = [self[x].val for x in items if self[x].val is not None]
+            if len(set(item_vals)) != len(item_vals):
                 return False
         for items in self.__itercols__():
-            if len({self[x].val for x in items}) != self.dim**2:
+            item_vals = [self[x].val for x in items if self[x].val is not None]
+            if len(set(item_vals)) != len(item_vals):
                 return False
         for items in self.__iterboxes__():
-            if len({self[x].val for x in items}) != self.dim**2:
+            item_vals = [self[x].val for x in items if self[x].val is not None]
+            if len(set(item_vals)) != len(item_vals):
                 return False
         return True
+
+    def complete(self):
+        """Check if the board is completed without errors"""
+        for cell in self.board:
+            if cell.val is None:
+                return False
+        return self.is_valid()
+
     def __getitem__(self, i):
         return self.board[i]
+
+    def to_dict(self):
+        """convert board to dictionary"""
+        return {('_%i' %i): c.val for i, c in enumerate(self.board) if c.val is not None}
 
 def test_functions(func, dim=3, indx=0):
     """docstring"""
@@ -369,3 +432,11 @@ def test_functions(func, dim=3, indx=0):
         brd[id_].val = 'H'
     brd[indx].val = 'O'
     return brd
+
+
+if __name__ == '__main__':
+    for b in BOARDS:
+        board = SudokuBoard(3, init=True, **b)
+        board.solve()
+        print(board)
+        print(board.is_valid(), board.complete())
