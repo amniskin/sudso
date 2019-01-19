@@ -27,18 +27,15 @@ The basic structure is:
     cells keep track of everything pertaining to that individual cell. e.g.
         * It's own value -- if it hsa one
         * set of possible values
-        * move IDs that involve that cell
-            this is so that you can undo things later
-            It's stored as a dictionary -- keys are the move ID and vals are
-            the elements removed from the set of possible values since the
-            move. -- Here moves are considered any time the algo makes a guess,
-            as is necessary in underdetermined boards.
+        * color -- for printing reasons
+        * failed guesses
 """
 
 import logging
 from itertools import combinations
 from functools import reduce
 from copy import copy, deepcopy
+from math import ceil
 
 LOGGER = logging.getLogger(__file__)
 SH = logging.StreamHandler()
@@ -130,9 +127,8 @@ class SudokuCell():
         self.id_ = id_
         self.val = None
         self.dim = dim
-        self.color = '34'
-        self.options = set(range(1, dim**2+1))
-        self.guesses = set()
+        self.color = '34'  # for identifying erroneous moves easily
+        self.options = set(range(1, dim**2+1))  # all possible options
 
     def set_value(self, val):
         """Sets the value of the cell
@@ -165,14 +161,7 @@ class SudokuCell():
 
     def possible_guesses(self):
         """make a guess"""
-        return self.options.difference(self.guesses)
-
-    def add_guess(self, guess):
-        """add a guess that didn't work out"""
-        assert guess in self.possible_guesses(), 'Invalid guess!'
-        self.guesses.add(guess)
-        self.options.remove(guess)
-        return True
+        return self.options
 
     def bad_cell(self):
         """designate this cell as bad"""
@@ -185,7 +174,6 @@ class SudokuCell():
         cell.val = self.val
         cell.color = self.color
         cell.options = deepcopy(self.options)
-        cell.guesses = deepcopy(self.guesses)
         return cell
 
     copy = __deepcopy__
@@ -293,7 +281,7 @@ class SudokuBoard():
         if not self.boards:
             return False
         (cell, guess), self.board = self.boards.pop(-1)
-        self[cell].add_guess(guess)
+        self.remove_option(cell, guess)
         return True
 
     def solve(self):
@@ -302,7 +290,7 @@ class SudokuBoard():
         changed = True
         while changed:
             changed = False
-            for i in range(2, (self.dim**2/2)):  # TODO: remove hard coded magic number
+            for i in range(2, ceil(self.dim**2/2)):
                 changed = False
                 for j in range(1, i):
                     this_chng = self.__solver__(j)
