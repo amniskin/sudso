@@ -38,87 +38,12 @@ The basic structure is:
 import logging
 from itertools import combinations
 from functools import reduce
-# from copy import deepcopy
+from copy import copy, deepcopy
 
 LOGGER = logging.getLogger(__file__)
 SH = logging.StreamHandler()
 SH.setLevel(logging.DEBUG)
 LOGGER.addHandler(SH)
-
-SBOARD0 = {
-        '_0': 5,
-        '_1': 3,
-        '_4': 7,
-        '_9': 6,
-        '_12':1,
-        '_13':9,
-        '_14':5,
-        '_19':9,
-        '_20':8,
-        '_25':6,
-        '_27':8,
-        '_31':6,
-        '_35':3,
-        '_36':4,
-        '_39':8,
-        '_41':3,
-        '_44':1,
-        '_45':7,
-        '_49':2,
-        '_53':6,
-        '_55':6,
-        '_60':2,
-        '_61':8,
-        '_66':4,
-        '_67':1,
-        '_68':9,
-        '_71':5,
-        '_76':8,
-        '_79':7,
-        '_80':9
-        }
-
-SBOARD1 = {
-        '_7': 1,
-        '_14':2,
-        '_17':3,
-        '_21':4,
-        '_33':5,
-        '_36':4,
-        '_38':1,
-        '_39':6,
-        '_47':7,
-        '_48':1,
-        '_55':5,
-        '_60':2,
-        '_67':8,
-        '_70':4,
-        '_73':3,
-        '_75':9,
-        '_76':1
-        }
-
-SBOARD2 = {
-        '_0':8,
-        '_1':6,
-        '_4':2,
-        '_12':7,
-        '_16':5,
-        '_17':9,
-        '_31':6,
-        '_33':8,
-        '_37':4,
-        '_47':5,
-        '_48':3,
-        '_53':7,
-        '_64':2,
-        '_69':6,
-        '_74':7,
-        '_75':5,
-        '_77':9
-        }
-
-BOARDS = [SBOARD0, SBOARD1, SBOARD2]
 
 
 def _rowcol_to_id(row, column, dim):
@@ -176,6 +101,14 @@ def _id_to_related(id_, dim):
     retset.update(_id_to_box_id(id_, dim))
     return retset
 
+def test_functions(func, dim=3, indx=0):
+    """docstring"""
+    brd = SudokuBoard(dim)
+    for id_ in func(indx, dim):
+        brd[id_].val = 'H'
+    brd[indx].val = 'O'
+    return brd
+
 
 class SudokuCell():
     """The sudoku board cell class
@@ -197,7 +130,9 @@ class SudokuCell():
         self.id_ = id_
         self.val = None
         self.dim = dim
+        self.color = '34'
         self.options = set(range(1, dim**2+1))
+        self.guesses = set()
 
     def set_value(self, val):
         """Sets the value of the cell
@@ -228,15 +163,38 @@ class SudokuCell():
             return list(self.options)[0]
         return None
 
-    def copy(self):
+    def possible_guesses(self):
+        """make a guess"""
+        return self.options.difference(self.guesses)
+
+    def add_guess(self, guess):
+        """add a guess that didn't work out"""
+        assert guess in self.possible_guesses(), 'Invalid guess!'
+        self.guesses.add(guess)
+        self.options.remove(guess)
+        return True
+
+    def bad_cell(self):
+        """designate this cell as bad"""
+        self.color = '35'
+
+    def __deepcopy__(self, foo):
         """Copy the cell"""
-        cell = SudokuCell(self.val, self.dim)
-        cell.options = self.options
+        # pylint: disable=blacklisted-name
+        cell = SudokuCell(self.id_, self.dim)
+        cell.val = self.val
+        cell.color = self.color
+        cell.options = deepcopy(self.options)
+        cell.guesses = deepcopy(self.guesses)
         return cell
+
+    copy = __deepcopy__
+
 
     def __str__(self):
         """return a string representation of the cell (just the value)"""
-        return '  % 3s  ' % (str(self.val) if self.val is not None else '')
+        return '  \x1b[%sm% 3s\x1b[0m  ' % (self.color,
+                                            str(self.val) if self.val is not None else '')
 
 
 class SudokuBoard():
@@ -254,6 +212,7 @@ class SudokuBoard():
     def __init__(self, dim, init=True, **kwargs):
         self.dim = dim
         self.board = [SudokuCell(id_, dim) for id_ in range(dim**4)]
+        self.boards = []
         for id_, val in kwargs.items():
             id_ = int(id_.strip('_'))
             if init:
@@ -310,26 +269,32 @@ class SudokuBoard():
                             inner_changed = inner_changed or newval
             return inner_changed
         changed = False
-        for row in self.__iterrows__():
-            changed = changed or inner_func(row)
-        for col in self.__itercols__():
-            changed = changed or inner_func(col)
-        for box in self.__iterboxes__():
-            changed = changed or inner_func(box)
+        for items in self.__iterneighbors__():
+            changed = changed or inner_func(items)
         return changed
 
-    def guess(self):
+    def make_guess(self):
         """make a guess"""
         this_cell = None
         for cell in self.board:
-            if cell.val is None:
+            guesses = cell.possible_guesses()
+            if guesses:
                 this_cell = cell
+                this_guess = list(guesses)[0]
                 break
         if this_cell is None:
-            return False, self.board
-        new_board = self.copy()
-        new_board.make_move(this_cell.id_, list(this_cell.options)[0])
-        return True, new_board.board
+            return False
+        self.boards.append(((this_cell.id_, this_guess), self.copy_board()))
+        self.make_move(this_cell.id_, this_guess)
+        return True
+
+    def revert_guess(self):
+        """revert a guess"""
+        if not self.boards:
+            return False
+        (cell, guess), self.board = self.boards.pop(-1)
+        self[cell].add_guess(guess)
+        return True
 
     def solve(self):
         """Solve this board!"""
@@ -343,29 +308,40 @@ class SudokuBoard():
                     this_chng = self.__solver__(j)
                     changed = changed or this_chng
                     if not self.is_valid():
-                        return False
+                        if self.boards:
+                            reverted = self.revert_guess()
+                            changed = changed or reverted
+                        else:
+                            return False
                 if self.complete():
                     return True
+            if not changed:
+                guessed = self.make_guess()
+                changed = guessed
 
-    def copy(self):
+    def copy_board(self):
         """make a copy of the board"""
+        return [deepcopy(x) for x in self.board]
+
+    def __deepcopy__(self, something):
+        """make a copy of the board object"""
         new_board = SudokuBoard(self.dim)
-        new_board.board = [x.copy() for x in self.board]
+        new_board.board = [deepcopy(x) for x in self.board]
+        new_board.boards = [deepcopy(b) for b in self.boards]
         return new_board
+
+    copy = __deepcopy__
 
     def __str__(self):
         """Get the sudoku board vector"""
-        line_len = None
+        line_len = 8*(self.dim**2)+self.dim+2
         outstr = '|'
         for id_, cell in enumerate(self.board):
             outstr += '|'+cell.__str__()
             if (id_ % self.dim) == (-1 % self.dim):
                 outstr += '|'
                 if (id_ % (self.dim**2)) == (-1 % (self.dim**2)):
-                    outstr += '|'
-                    if line_len is None:
-                        line_len = len(outstr)
-                    outstr += '\n'
+                    outstr += '|\n'
                     if (id_ % (self.dim**3)) == (-1 % (self.dim**3)):
                         outstr += '='*line_len + '\n'
                     else:
@@ -388,6 +364,11 @@ class SudokuBoard():
         for i in range(self.dim**2):
             yield _box_to_ids(i, self.dim)
 
+    def __iterneighbors__(self):
+        for func in [self.__iterboxes__, self.__iterrows__, self.__itercols__]:
+            for items in func():
+                yield items
+
     def init(self):
         """ initialize the cells """
         for id_, cell in enumerate(self.board):
@@ -397,11 +378,15 @@ class SudokuBoard():
 
     def is_valid(self):
         """docstring"""
-        for func in [self.__iterrows__, self.__itercols__, self.__iterboxes__]:
-            for items in func():
-                item_vals = [self[x].val for x in items if self[x].val is not None]
-                if len(set(item_vals)) != len(item_vals):
-                    return False
+        # pylint: disable=invalid-name
+        for items in self.__iterneighbors__():
+            item_vals = [self[x].val for x in items if self[x].val is not None]
+            if len(set(item_vals)) != len(item_vals):
+                dups = [(x, y) for x, y in combinations(items, 2) if self[x].val == self[y].val]
+                for x, y in dups:
+                    self[x].bad_cell()
+                    self[y].bad_cell()
+                return False
         return True
 
     def complete(self):
@@ -418,18 +403,18 @@ class SudokuBoard():
         """convert board to dictionary"""
         return {('_%i' %i): c.val for i, c in enumerate(self.board) if c.val is not None}
 
-def test_functions(func, dim=3, indx=0):
-    """docstring"""
-    brd = SudokuBoard(dim)
-    for id_ in func(indx, dim):
-        brd[id_].val = 'H'
-    brd[indx].val = 'O'
-    return brd
-
 
 if __name__ == '__main__':
+    import sys
+    import os
+    LIBPATH = os.path.normpath(os.path.join(os.path.dirname(os.path.realpath(__file__)),
+                                            os.pardir))
+    print(LIBPATH)
+    sys.path.append(LIBPATH)
+    from sudso.example_boards import BOARDS
     for b in BOARDS:
-        board = SudokuBoard(3, init=True, **b)
+        print('================================')
+        board = copy(SudokuBoard(3, init=True, **b))
         board.solve()
         print(board)
         print(board.is_valid(), board.complete())
