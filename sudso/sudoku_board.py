@@ -302,7 +302,7 @@ class SudokuBoard():
         changed = True
         while changed:
             changed = False
-            for i in range(2, 6):  # TODO: remove hard coded magic number
+            for i in range(2, (self.dim**2/2)):  # TODO: remove hard coded magic number
                 changed = False
                 for j in range(1, i):
                     this_chng = self.__solver__(j)
