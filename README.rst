@@ -4,7 +4,7 @@ SUDoku-SOlver
 Various approaches to sudoku solving. NOTE: This is a python3 library, unfortunately.
 
 To install, run the following from a terminal:
-	>>> pip install .
+	$ pip install .
 
 
 For now, to run it like so (but this will change eventually):
