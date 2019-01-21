@@ -2,11 +2,12 @@
 # -*- coding: utf-8 -*-
 # Author            : Aaron Niskin <aaron@niskin.org>
 # Date              : 2019-01-19
-# Last Modified Date: 2019-01-19
+# Last Modified Date: 2019-01-20
 # Last Modified By  : Aaron Niskin <aaron@niskin.org>
 """Example boards... Should eventually be json files"""
 
 SBOARD0 = {
+        'dim': 3,
         '_0': 5,
         '_1': 3,
         '_4': 7,
@@ -40,6 +41,7 @@ SBOARD0 = {
         }
 
 SBOARD1 = {
+        'dim': 3,
         '_7': 1,
         '_14':2,
         '_17':3,
@@ -60,6 +62,7 @@ SBOARD1 = {
         }
 
 SBOARD2 = {
+        'dim': 3,
         '_0':8,
         '_1':6,
         '_4':2,
